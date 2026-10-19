@@ -1,0 +1,40 @@
+name: Build and release
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+    paths: ['Resources/Info.plist', '.github/workflows/release.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - name: Check out tagged source
+        env:
+          REPO_URL: https://github.com/${{ github.repository }}.git
+          BUILD_REF: ${{ github.ref_name }}
+        run: git clone --depth 1 --branch "$BUILD_REF" "$REPO_URL" source
+      - name: Build and validate
+        working-directory: source
+        run: ./scripts/build.sh
+      - name: Publish release
+        if: github.event_name == 'push'
+        working-directory: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_REF: ${{ github.ref_name }}
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)
+          RELEASE_TAG="v$VERSION"
+          if [[ "$BUILD_REF" == v* ]]; then RELEASE_TAG="$BUILD_REF"; fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; leaving it unchanged."
+            exit 0
+          fi
+          gh release create "$RELEASE_TAG" \
+            build/Codex-Limits-macOS-arm64.zip build/SHA256SUMS.txt \
+            --target "$BUILD_SHA" --title "Codex Limits $RELEASE_TAG" --notes-file RELEASE_NOTES.md
